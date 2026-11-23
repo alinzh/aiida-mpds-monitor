@@ -3,6 +3,8 @@ workchain_hierarchy:
   MPDSAbacusStructureWorkChain: &abacus_structure
     AbacusBaseWorkChain:
       - AbacusCalculation
+    AbacusRelaxWorkChain:
+      - AbacusBaseWorkChain
     PhonopyAbacusWorkChain:
       - AbacusForcesWorkChain
   MPDSAbacusWorkChain: *abacus_structure

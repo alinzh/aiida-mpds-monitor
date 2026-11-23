@@ -1,9 +1,11 @@
 """Publication policy and phonon layouts on top of CRYSTAL archive recovery."""
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 from aiida.common.extendeddicts import AttributeDict
 
 from aiida_mpds_monitor import daemon
@@ -262,3 +264,17 @@ def test_nested_phonon_root_is_only_reported_once(caller_type, expected):
     phonons = SimpleNamespace(process_label="PhonopyAbacusWorkChain", caller=caller)
     hierarchy = {"MPDSAbacusWorkChain": {"PhonopyAbacusWorkChain": []}}
     assert daemon.is_reported_by_caller(phonons, hierarchy) is expected
+
+
+
+def test_abacus_hierarchy_covers_relaxation_and_both_parent_types():
+    template = Path(__file__).resolve().parents[1] / "conf.abacus.yaml"
+    hierarchy = yaml.safe_load(template.read_text())["workchain_hierarchy"]
+    for process_label in ("MPDSAbacusStructureWorkChain", "MPDSAbacusWorkChain"):
+        children = hierarchy[process_label]
+        assert children["AbacusRelaxWorkChain"] == ["AbacusBaseWorkChain"]
+        nested = SimpleNamespace(
+            process_label="PhonopyAbacusWorkChain",
+            caller=SimpleNamespace(process_label=process_label),
+        )
+        assert daemon.is_reported_by_caller(nested, hierarchy)
