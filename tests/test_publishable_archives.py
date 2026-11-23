@@ -22,11 +22,12 @@ def calcjob_type(monkeypatch):
 
 def calculation(tmp_path, pk, *, label="forces", process_label="AbacusCalculation",
                 successful=True, files=None):
+    output_name = "running_scf.log" if process_label == "AbacusCalculation" else "OUTPUT"
     node = DummyCalcJobNode(
         uuid=f"calc-{pk}", pk=pk, label=label, is_finished_ok=successful,
         retrieved=_create_retrieved_folder(
             tmp_path / str(pk), files if files is not None else {
-                "INPUT": b"input", "OUTPUT": str(pk).encode(),
+                "INPUT": b"input", output_name: str(pk).encode(),
             },
         ),
     )
@@ -85,8 +86,8 @@ def test_phonon_archive_keeps_duplicate_labels_and_direct_result(tmp_path, monke
         parent.uuid, base_nodes=[workflow], tmp_root=tmp_path / "staging",
     )
     assert result is not None
-    assert captured["forces/OUTPUT"] == b"1"
-    assert captured["forces_2/OUTPUT"] == b"2"
+    assert captured["forces/running_scf.log"] == b"1"
+    assert captured["forces_2/running_scf.log"] == b"2"
     assert captured["PhonopyCalculation/OUTPUT"] == b"3"
 
 
@@ -104,11 +105,11 @@ def test_phonon_archive_suffixes_cannot_overwrite_existing_labels(tmp_path, monk
         parent.uuid, base_nodes=[workflow], tmp_root=tmp_path / "staging",
     ) is not None
 
-    assert captured["forces_4/OUTPUT"] == b"1"
-    assert captured["forces_4_2/OUTPUT"] == b"2"
-    assert captured["forces/OUTPUT"] == b"3"
-    assert captured["forces_4_3/OUTPUT"] == b"4"
-    assert len([name for name in captured if name.endswith("/OUTPUT")]) == 4
+    assert captured["forces_4/running_scf.log"] == b"1"
+    assert captured["forces_4_2/running_scf.log"] == b"2"
+    assert captured["forces/running_scf.log"] == b"3"
+    assert captured["forces_4_3/running_scf.log"] == b"4"
+    assert len([name for name in captured if name.endswith("/running_scf.log")]) == 4
 
 
 def test_daemon_waits_for_parent_owned_calculation_and_retries_repository_errors(
@@ -171,7 +172,7 @@ def test_daemon_waits_for_parent_owned_calculation_and_retries_repository_errors
 
     upload.assert_called_once()
     assert captured["PhonopyCalculation/OUTPUT"] == b"2"
-    assert captured["forces/OUTPUT"] == b"1"
+    assert captured["forces/running_scf.log"] == b"1"
     assert stored[EXTRA_PARENT_PROCESSED] is True
     assert stored[EXTRA_ARCHIVE_PROCESSED] is True
 
@@ -227,7 +228,7 @@ def test_failed_calculations_are_logged_but_never_archived(tmp_path, monkeypatch
         parent.uuid, base_nodes=[workflow], tmp_root=tmp_path / "staging",
         require_all_subnodes=False,
     ) is not None
-    assert captured == {"forces/INPUT": b"input", "forces/OUTPUT": b"1"}
+    assert captured == {"forces/running_scf.log": b"1"}
     assert "left out 1 unsuccessful calculation(s): 2" in caplog.text
 
 

@@ -528,3 +528,46 @@ def test_fleur_displacement_folders(tmp_path, labels, dirs):
         patch("aiida_mpds_monitor.generate_archive.archive_and_save", side_effect=check_archive),
     ):
         assert generate_parent_archive("parent-uuid", tmp_root=tmp_path / "tmp") is not None
+
+
+@pytest.mark.parametrize("numbers", [("01", "02"), (None, None)])
+def test_abacus_displacements_use_provenance_and_keep_native_logs(tmp_path, monkeypatch, numbers):
+    from io import BytesIO
+
+    from aiida_mpds_monitor import generate_archive as module
+
+    class Repository:
+        def list_object_names(self):
+            return ["OUT.aiida", "INPUT", "warning.log"]
+
+        def walk(self):
+            yield "", ["OUT.aiida"], ["INPUT", "warning.log"]
+            yield "OUT.aiida", [], ["running_scf.log"]
+
+        def open(self, name, mode):
+            assert name == "OUT.aiida/running_scf.log"
+            return BytesIO(b"ABACUS results")
+
+    jobs = []
+    for pk, number in enumerate(numbers, start=101):
+        job = DummyCalcJobNode(uuid=f"job-{pk}", pk=pk, label="same", retrieved=Repository())
+        job.process_label = "AbacusCalculation"
+        forces = SimpleNamespace(
+            process_label="AbacusForcesWorkChain",
+            inputs=SimpleNamespace(
+                structure_label=SimpleNamespace(base=SimpleNamespace(attributes={"value": number}))
+            ),
+        )
+        job.caller = SimpleNamespace(process_label="AbacusBaseWorkChain", caller=forces)
+        jobs.append(job)
+
+    parent = DummyProcessNode(uuid="parent", called=jobs)
+    captured = {}
+    monkeypatch.setattr(module, "CalcJobNode", DummyCalcJobNode)
+    monkeypatch.setattr(module, "load_node", lambda uuid: parent)
+    monkeypatch.setattr(module, "archive_and_save", _capturing_archive_and_save(captured))
+    assert generate_parent_archive("parent", tmp_root=tmp_path / "stage")
+    assert set(captured["files"]) == {
+        f"Abacus forces calculation {number or pk}/OUT.aiida/running_scf.log"
+        for pk, number in enumerate(numbers, start=101)
+    }

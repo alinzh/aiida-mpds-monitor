@@ -1,0 +1,11 @@
+# Staged hierarchy. Set monitor_filters for the intended ABACUS campaigns before rollout.
+workchain_hierarchy:
+  MPDSAbacusStructureWorkChain: &abacus_structure
+    AbacusBaseWorkChain:
+      - AbacusCalculation
+    PhonopyAbacusWorkChain:
+      - AbacusForcesWorkChain
+  MPDSAbacusWorkChain: *abacus_structure
+  PhonopyAbacusWorkChain:
+    AbacusForcesWorkChain:
+      - AbacusBaseWorkChain
