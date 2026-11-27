@@ -8,6 +8,9 @@
 - Status webhooks for completed and failed calculations.
 - `.7z` archives of retrieved outputs and submitted inputs.
 - FLEUR phonon archives include the standard Phonopy outputs `qpoints.yaml` (Gamma), `mesh.hdf5` (8×8×8), and `thermal_properties.yaml` (0 and 300 K) when the calculation provides force constants.
+- ABACUS archives keep native run logs and the reference geometry when available.
+  Phonon jobs publish the same three standard Phonopy files, with separate
+  directories for the displacement calculations. See `conf.abacus.yaml` for the staged hierarchy.
 - CRYSTAL archive validation and recovery after a specific server rejection.
 - Workflow filters by creation date, formula, and chemical elements.
 - Optional Telegram reports for running calculations and upload errors.

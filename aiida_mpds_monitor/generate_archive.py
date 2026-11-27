@@ -5,7 +5,7 @@ import shutil
 from itertools import chain
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from aiida import load_profile as load_aiida_profile
 from aiida.orm import CalcJobNode, load_node, WorkChainNode
@@ -153,8 +153,40 @@ def _safe_dir_name(name: str) -> str:
     return result
 
 
+_ABACUS_ARCHIVE_FILES = frozenset({
+    "running_scf.log", "running_relax.log", "running_cell-relax.log", "STRU_FINAL",
+})
+
+
+def _abacus_archive_label(calculation: Any) -> Optional[str]:
+    """Keep the displacement number even for already submitted workflows."""
+    caller = getattr(calculation, "caller", None)
+    while caller is not None:
+        if caller.process_label == "AbacusForcesWorkChain":
+            label_node = getattr(caller.inputs, "structure_label", None)
+            number = getattr(label_node, "value", None)
+            if number is None and getattr(label_node, "base", None) is not None:
+                number = label_node.base.attributes.get("value", None)
+            if number is not None and re.fullmatch(r"[0-9]+", str(number)):
+                return f"Abacus forces calculation {number}"
+            return f"Abacus forces calculation {calculation.pk}"
+        caller = caller.caller
+    return None
+
+
+def _copy_abacus_structure(calculation: Any, destination: Path) -> None:
+    """Keep the native input geometry for SCF runs that have no STRU_FINAL."""
+    if any(destination.rglob("STRU_FINAL")) or not any(destination.rglob("running_scf.log")):
+        return
+    repository = getattr(getattr(calculation, "base", None), "repository", None)
+    if repository is not None and "STRU" in repository.list_object_names():
+        with repository.open("STRU", "rb") as source, (destination / "STRU").open("wb") as target:
+            shutil.copyfileobj(source, target)
+
+
 def _copy_retrieved(
-    folder: Any, destination: Path, *, exclude: frozenset[str] = frozenset()
+    folder: Any, destination: Path, *, exclude: frozenset[str] = frozenset(),
+    include: Optional[Callable[[str], bool]] = None,
 ) -> List[str]:
     """Copy the repository tree, skipping explicitly excluded relative paths."""
     repository = getattr(getattr(folder, "base", None), "repository", folder)
@@ -165,12 +197,14 @@ def _copy_retrieved(
             target.mkdir(parents=True, exist_ok=True)
             for name in files:
                 relative = str(Path(directory) / name)
-                if relative in exclude:
+                if relative in exclude or (include is not None and not include(name)):
                     continue
                 with repository.open(relative, "rb") as source, (target / name).open("wb") as dest:
                     shutil.copyfileobj(source, dest)
     else:
         for name in names:
+            if include is not None and not include(name):
+                continue
             with folder.open(name, "rb") as source, (destination / name).open("wb") as dest:
                 shutil.copyfileobj(source, dest)
     return names
@@ -519,7 +553,9 @@ def generate_parent_archive(
                 )
                 continue
 
-            label = getattr(calculation, "label", None)
+            is_abacus = process_label == "AbacusCalculation"
+            abacus_force_label = _abacus_archive_label(calculation) if is_abacus else None
+            label = abacus_force_label or getattr(calculation, "label", None)
             if not label or not str(label).strip():
                 label = process_label or f"calculation_{calculation.pk}"
 
@@ -557,6 +593,27 @@ def generate_parent_archive(
             calculation_dir.mkdir(parents=True, exist_ok=False)
             if stage_nodes is not None:
                 stage_nodes[label_str] = calculation
+            if is_abacus:
+                try:
+                    native_files = _ABACUS_ARCHIVE_FILES
+                    if abacus_force_label is not None:
+                        native_files = native_files - {"STRU_FINAL"}
+                    _copy_retrieved(
+                        repo_folder, calculation_dir, include=native_files.__contains__
+                    )
+                    for final_structure in calculation_dir.rglob("STRU_FINAL"):
+                        if final_structure.is_file() and not final_structure.stat().st_size:
+                            final_structure.unlink()
+                    if abacus_force_label is None:
+                        _copy_abacus_structure(calculation, calculation_dir)
+                except Exception as exc:
+                    logger.warning("Could not copy ABACUS results for %s: %s", calculation.pk, exc)
+                    return None
+                if not any(path.is_file() for path in calculation_dir.rglob("*")):
+                    _cleanup_staging(calculation_dir, archive_root)
+                    if stage_nodes is not None:
+                        stage_nodes.pop(label_str, None)
+                continue
             is_phonopy = process_label == "PhonopyCalculation"
             try:
                 excluded_files = (
